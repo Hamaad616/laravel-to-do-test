@@ -3,20 +3,22 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Otp;
+use App\Http\Requests\LoginRequest;
+use App\Http\Requests\RegisterRequest;
 use App\Models\User;
 use App\Services\EmailVerificationService;
+use App\Transformers\LoginTransformer;
+use App\Transformers\LogoutTransformer;
+use App\Transformers\UnauthorizedUserTransformer;
 use Exception;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Database\Eloquent\Factories\Factory;
+use Spatie\Fractal\Fractal;
 
 /**
  *
  */
 class AuthController extends Controller
 {
-
     private EmailVerificationService $emailVerificationService;
 
     /**
@@ -26,23 +28,18 @@ class AuthController extends Controller
      */
     public function __construct(EmailVerificationService $emailVerificationService)
     {
-        $this->emailVerificationService = $emailVerificationService;
         $this->middleware('auth:api', ['except' => ['login', 'register']]);
+        $this->emailVerificationService = $emailVerificationService;
     }
 
     /**
      * @throws Exception
      */
-    public function register(Request $request){
+    public function register(RegisterRequest $request){
 
         //validate the required data
         //it is a good practice to always validate data to keep app from attacks
-        $request->validate([
-            "name" => 'required',
-            'email' => 'required|email|unique:users',
-            'password' => 'required',
-            'confirm_password' => 'required|same:password',
-        ]);
+
 
         $user = User::create([
             'name' => $request->name,
@@ -50,7 +47,7 @@ class AuthController extends Controller
             'password' => \Hash::make($request->password)
         ]);
 
-        //after creation
+        // after creation,
         // I have created an email verification service that implements an interface
         // the EmailVerification Service is injected here i.e. using Dependency Injection
         return $this->emailVerificationService->generateOtp($user);
@@ -61,20 +58,21 @@ class AuthController extends Controller
      *
      * @return JsonResponse
      */
-    public function login()
+    public function login(LoginRequest $request)
     {
-        \request()->validate([
-            'email' => 'required|email',
-            'password' => 'required'
-        ]);
-
         $credentials = request(['email', 'password']);
 
         if (! $token = auth('api')->attempt($credentials)) {
-            return response()->json(['error' => 'Unauthorized'], 401);
+            $data = ['error' => 'Invalid email or password provided.'];
+            $transformedResponse = Fractal::create()->item($data)->transformWith(new UnauthorizedUserTransformer())->toArray();
+            return response()->json($transformedResponse, 401);
         }
 
-        return $this->respondWithToken($token);
+        // Get the authenticated user
+        $authenticatedUser = auth('api')->user();
+
+        $transformedUser = Fractal::create()->item($this->respondWithToken($token, $authenticatedUser))->transformWith(new LoginTransformer())->toArray();
+        return response()->json($transformedUser);
     }
 
     /**
@@ -86,56 +84,25 @@ class AuthController extends Controller
     {
         auth()->invalidate();
         auth()->logout();
-        return response()->json(['message' => 'Successfully logged out']);
-    }
-
-    /**
-     * Refresh a token.
-     *
-     * @return JsonResponse
-     */
-    public function refresh()
-    {
-        return $this->respondWithToken(auth()->refresh());
+        $message = 'Successfully logged out';
+        $transformed_response = Fractal::create()->item($message)->transformWith(new LogoutTransformer())->toArray();
+        return response()->json($transformed_response);
     }
 
     /**
      * Get the token array structure.
      *
-     * @param  string $token
-     *
-     * @return JsonResponse
+     * @param string $token
+     * @param $user
+     * @return array
      */
-    protected function respondWithToken($token)
+    protected function respondWithToken(string $token, $user)
     {
-        return response()->json([
+        return [
             'access_token' => $token,
             'token_type' => 'bearer',
-            'expires_in' => auth()->factory()->getTTL() * 60
-        ]);
-    }
-
-    /**
-     * @param Request $request
-     * @return JsonResponse
-     */
-    public function verifyOtp(Request $request): JsonResponse
-    {
-        $request->validate([
-            'otp' => 'required'
-        ]);
-
-        //here I am checking for most recent OTP for current user
-        $otp_user = Otp::where('otp', $request->otp)->where('user_id', \Auth::user()->id)->where('verified', false)->first();
-
-        //if it exists I then call my service
-        // In service there is a method named verifyOtp it takes the Authenticated User and the otp entered by the user
-        if($otp_user){
-            return $this->emailVerificationService->verifyOtp(\Auth::user(), $request->otp);
-        }else{
-            return response()->json([
-                'message' => 'Please request a new OTP, this OTP has been expired'
-            ]);
-        }
+            'expires_in' => auth()->factory()->getTTL() * 60,
+            'user' => $user
+        ];
     }
 }

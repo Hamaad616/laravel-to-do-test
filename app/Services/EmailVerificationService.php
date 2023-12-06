@@ -6,8 +6,11 @@ use App\Interfaces\EmailVerificationServiceInterface;
 use App\Models\Otp;
 use App\Models\User;
 use App\Notifications\EmailVerificationNotification;
+use App\Transformers\RegisterationTransformer;
+use App\Transformers\RegisterExceptionTransformer;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Spatie\Fractal\Fractal;
 
 class EmailVerificationService implements EmailVerificationServiceInterface
 {
@@ -21,23 +24,20 @@ class EmailVerificationService implements EmailVerificationServiceInterface
     function generateEmail(User $user, $otp): JsonResponse
     {
         // This method uses laravel's built in notify method for Eloquent
-        // I create EmailVerificationNotification and passed it to the notify method
+        // I created EmailVerificationNotification and passed it to the notify method
 
         // I am looking for any exception thrown by either mail client
         // or by the error inside notify
 
         try {
             $user->notify(new EmailVerificationNotification('Please use this code to verify your account', 'Email Verification', $user, $otp));
+            $transformedData = Fractal::create()->item($user)->transformWith(new RegisterationTransformer())->toArray();
 
-            return response()->json([
-                'status' => true,
-                'message' => 'An OTP has been sent to your email account, please use OTP to verify your email'
-            ]);
+            return response()->json($transformedData);
         }catch (\Exception $exception){
-            return response()->json([
-                'status' => false,
-                'message' => $exception->getMessage()
-            ]);
+            $transformedData = Fractal::create()->item($exception)->transformWith(new RegisterExceptionTransformer())->toArray();
+
+            return response()->json($transformedData, 500);
         }
     }
 
@@ -75,7 +75,6 @@ class EmailVerificationService implements EmailVerificationServiceInterface
         // check for match
         if($recent_user_otp->otp !== $otp_digits){
             return response()->json([
-                'status' => false,
                 'message' => 'OTP provided is invalid, please provide valid OTP'
             ]);
         }
@@ -91,7 +90,6 @@ class EmailVerificationService implements EmailVerificationServiceInterface
         $user->save();
 
         return response()->json([
-            'status' => true,
             'message' => 'Your email has been verified successfully.'
         ]);
 

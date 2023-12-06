@@ -13,7 +13,7 @@ return new class extends Migration
     {
         Schema::create('to_dos', function (Blueprint $table) {
             $table->id();
-            $table->string('title')->unique();
+            $table->string('title');
             $table->string('description')->nullable();
             $table->unsignedBigInteger('user_id');
             $table->timestamps();

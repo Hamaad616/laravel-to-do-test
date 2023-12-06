@@ -3,14 +3,27 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\TodoStoreRequest;
 use App\Http\Resources\TodoApiResource;
 use App\Models\ToDo;
+use App\Repositories\TodoRepository;
+use App\Transformers\TodoCreationTransformer;
+use App\Transformers\TodoListTransformer;
+use App\Transformers\TodoNotFoundTransformer;
+use App\Transformers\TodoRemovedTransformer;
+use App\Transformers\TodoTransformer;
+use App\Transformers\TodoUpdatedTransformer;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
+use Spatie\Fractal\Fractal;
 
 class TodoController extends Controller
 {
-    public function __construct()
+    private TodoRepository $todoRepository;
+
+    public function __construct(TodoRepository $todoRepository)
     {
+        $this->todoRepository = $todoRepository;
         $this->middleware('auth:api');
     }
 
@@ -23,40 +36,23 @@ class TodoController extends Controller
         $perPage = $request->perPage ?? 10;
         $name = $request->name;
 
-        if(!empty($name)){
-            $todos = ToDo::where('user_id', \Auth::user()->id)->where('title', 'LIKE', '%'.$name.'%')->paginate($perPage);
-        }else{
-            $todos = ToDo::where('user_id', \Auth::user()->id)->paginate($perPage);
-        }
+        $todos = $this->todoRepository->all(\Auth::user()->id, $perPage, $name);
 
-        return new TodoApiResource($todos);
+        $transformedTodoList = Fractal::create()->item($todos)->transformWith(new TodoListTransformer())->toArray();
+        return response()->json($transformedTodoList);
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
-    }
 
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    public function store(TodoStoreRequest $request)
     {
-        $request->validate([
-            'title' => 'required|max:255',
-            'description' => 'required'
-        ]);
+        $todo = $this->todoRepository->create(\Auth::user()->id, $request->title, $request->description);
 
-        $todo = ToDo::create([
-            'user_id' => \Auth::user()->id,
-            'title' => $request->title,
-            'description' => $request->description
-        ]);
+        $transformedTodo = Fractal::create()->item($todo)->transformWith(new TodoCreationTransformer())->toArray();
 
-        return new TodoApiResource($todo);
+        return response()->json($transformedTodo);
     }
 
     /**
@@ -64,47 +60,31 @@ class TodoController extends Controller
      */
     public function show(string $id)
     {
-        $todo = \Auth::user()->todos->where('id', $id)->first();
-
-        if(!$todo){
-            return response()->json([
-                'error' => 'Todo not found in the list'
-            ], 404);
+        try {
+            $todo = $this->todoRepository->find($id);
+            $transformedTodo = Fractal::create()->item($todo)->transformWith(new TodoTransformer())->toArray();
+            return response()->json($transformedTodo);
+        } catch (ModelNotFoundException $exception) {
+            $transformedResult = Fractal::create()->item($exception)->transformWith(new TodoNotFoundTransformer())->toArray();
+            return response()->json($transformedResult, 404);
         }
-        return new TodoApiResource($todo->only(['title', 'description']));
-    }
-
-    /**
-     * Show the form for editing the specified resource.
-     */
-    public function edit(string $id)
-    {
-        //
     }
 
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, string $id)
+    public function update(TodoStoreRequest $request, string $id)
     {
-        $validatedData = $request->validate([
-            'title' => 'required|max:255',
-            'description' => 'required'
-        ]);
+        try {
+            $todo = $this->todoRepository->update($id, $request->title, $request->description);
+            $transformedTodo = Fractal::create()->item($todo)->transformWith(new TodoUpdatedTransformer())->toArray();
 
-        $todo = ToDo::find($id);
+            return response()->json($transformedTodo);
+        } catch (ModelNotFoundException $exception) {
 
-        if(!$todo){
-            return response()->json([
-                'error' => 'Todo not found in the list'
-            ], 404);
+            $transformedResult = Fractal::create()->item($exception)->transformWith(new TodoNotFoundTransformer())->toArray();
+            return response()->json($transformedResult, 404);
         }
-
-        $todo->title = $request->title;
-        $todo->description = $request->description;
-        $todo->update();
-
-        return new TodoApiResource($todo->only(['title', 'description']));
     }
 
     /**
@@ -112,18 +92,15 @@ class TodoController extends Controller
      */
     public function destroy(string $id)
     {
-        $todo = ToDo::find($id);
+        try {
+            $todo = $this->todoRepository->delete($id);
 
-        if(!$todo){
-            return response()->json([
-                'error' => 'Todo not found in the list'
-            ], 404);
+            $transformedResult = Fractal::create()->item($todo)->transformWith(new TodoRemovedTransformer())->toArray();
+
+            return response()->json($transformedResult);
+        } catch (ModelNotFoundException $exception) {
+            $transformedResult = Fractal::create()->item($exception)->transformWith(new TodoNotFoundTransformer())->toArray();
+            return response()->json($transformedResult, 404);
         }
-
-        $todo->delete();
-
-        return response()->json([
-            'message' => 'Item removed successfully'
-        ]);
     }
 }

@@ -23,18 +23,28 @@ Route::post('register', [\App\Http\Controllers\Api\AuthController::class, 'regis
 
 Route::group([
     'middleware' => ['api', 'verify_email'],
+    'prefix' => 'otp'
+], function (){
+
+    //OTP SERVICE ROUTES
+    Route::post('verify-otp', [\App\Http\Controllers\Api\OtpController::class, 'verifyOtp']);
+
+});
+
+Route::group([
+    'middleware' => ['api', 'verify_email'],
     'prefix' => 'auth'
 ], function () {
 
-    // To-Do Routes
-    Route::resource('todos', \App\Http\Controllers\Api\TodoController::class);
-
-    //JWT ROUTES
-    Route::post('refresh', [\App\Http\Controllers\Api\AuthController::class, 'refresh']);
-
-    //OTP SERVICE ROUTES
-    Route::post('verify-otp', [\App\Http\Controllers\Api\AuthController::class, 'verifyOtp']);
-
     // Logout route
     Route::post('logout', [\App\Http\Controllers\Api\AuthController::class, 'logout']);
+});
+
+
+Route::group([
+    'middleware' => ['api', 'verify_email'],
+], function (){
+
+    // To-Do Routes
+    Route::resource('todos', \App\Http\Controllers\Api\TodoController::class);
 });
